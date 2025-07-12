@@ -265,6 +265,44 @@ loop_c_write(PyEventLoopObject *self, PyObject *args)
 }
 
 static PyObject *
+loop_c_drain_waiter(PyEventLoopObject *self, PyObject *arg)
+{
+    int fd = PyLong_AsLong(arg);
+    if (fd == -1 && PyErr_Occurred())
+        return NULL;
+
+    PyObject *asyncio = PyImport_ImportModule("asyncio");
+    if (!asyncio)
+        return NULL;
+    PyObject *Future = PyObject_GetAttrString(asyncio, "Future");
+    Py_DECREF(asyncio);
+    if (!Future)
+        return NULL;
+    PyObject *fut = PyObject_CallNoArgs(Future);
+    Py_DECREF(Future);
+    if (!fut)
+        return NULL;
+
+    if (fd >= self->fdcap || !self->fdmap[fd] || !self->fdmap[fd]->obuf ||
+        self->fdmap[fd]->obuf->pos >= self->fdmap[fd]->obuf->len) {
+        PyObject *res = PyObject_CallMethod(fut, "set_result", "O", Py_None);
+        Py_XDECREF(res);
+        if (!res) {
+            Py_DECREF(fut);
+            return NULL;
+        }
+        return fut;
+    }
+
+    OutBuf *ob = self->fdmap[fd]->obuf;
+    if (PyList_Append(ob->waiters, fut) < 0) {
+        Py_DECREF(fut);
+        return NULL;
+    }
+    return fut;
+}
+
+static PyObject *
 loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 {
     self->running = 1;
@@ -382,6 +420,8 @@ static PyMethodDef loop_methods[] = {
      PyDoc_STR("Remove writer callback for a file descriptor")},
     {"_c_write", (PyCFunction)loop_c_write, METH_VARARGS,
      PyDoc_STR("Low level write with buffering")},
+    {"_c_drain_waiter", (PyCFunction)loop_c_drain_waiter, METH_O,
+     PyDoc_STR("Return Future resolved when buffer drained")},
     {"run_forever", (PyCFunction)loop_run_forever, METH_NOARGS,
      PyDoc_STR("Run callbacks until queue is empty")},
     {NULL, NULL, 0, NULL}
