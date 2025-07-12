@@ -98,6 +98,13 @@ loop_add_reader(PyEventLoopObject *self, PyObject *args)
     if (ensure_fdslot(self, fd) < 0)
         return NULL;
     FDCallback *slot = self->fdmap[fd];
+    int op = (slot->reader || slot->writer) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+    uint32_t events = EPOLLET | EPOLLIN | (slot->writer ? EPOLLOUT : 0);
+    struct epoll_event ev = {.events = events, .data.u32 = (uint32_t)fd};
+    if (epoll_ctl(self->epfd, op, fd, &ev) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
     Py_XINCREF(cb);
     Py_XDECREF(slot->reader);
     slot->reader = cb;
@@ -112,7 +119,15 @@ loop_remove_reader(PyEventLoopObject *self, PyObject *arg)
         return NULL;
     if (fd >= self->fdcap || !self->fdmap[fd] || !self->fdmap[fd]->reader)
         Py_RETURN_FALSE;
-    Py_CLEAR(self->fdmap[fd]->reader);
+    FDCallback *slot = self->fdmap[fd];
+    Py_CLEAR(slot->reader);
+    uint32_t events = EPOLLET | (slot->writer ? EPOLLOUT : 0);
+    int op = events & (EPOLLIN | EPOLLOUT) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+    struct epoll_event ev = {.events = events, .data.u32 = (uint32_t)fd};
+    if (epoll_ctl(self->epfd, op, fd, &ev) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
     Py_RETURN_TRUE;
 }
 
@@ -130,6 +145,13 @@ loop_add_writer(PyEventLoopObject *self, PyObject *args)
     if (ensure_fdslot(self, fd) < 0)
         return NULL;
     FDCallback *slot = self->fdmap[fd];
+    int op = (slot->reader || slot->writer) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+    uint32_t events = EPOLLET | EPOLLOUT | (slot->reader ? EPOLLIN : 0);
+    struct epoll_event ev = {.events = events, .data.u32 = (uint32_t)fd};
+    if (epoll_ctl(self->epfd, op, fd, &ev) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
     Py_XINCREF(cb);
     Py_XDECREF(slot->writer);
     slot->writer = cb;
@@ -144,7 +166,15 @@ loop_remove_writer(PyEventLoopObject *self, PyObject *arg)
         return NULL;
     if (fd >= self->fdcap || !self->fdmap[fd] || !self->fdmap[fd]->writer)
         Py_RETURN_FALSE;
-    Py_CLEAR(self->fdmap[fd]->writer);
+    FDCallback *slot = self->fdmap[fd];
+    Py_CLEAR(slot->writer);
+    uint32_t events = EPOLLET | (slot->reader ? EPOLLIN : 0);
+    int op = events & (EPOLLIN | EPOLLOUT) ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+    struct epoll_event ev = {.events = events, .data.u32 = (uint32_t)fd};
+    if (epoll_ctl(self->epfd, op, fd, &ev) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
     Py_RETURN_TRUE;
 }
 
@@ -152,22 +182,66 @@ static PyObject *
 loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 {
     self->running = 1;
+    struct epoll_event evs[64];
 
-    while (self->running && PyList_Size(self->ready_q) > 0) {
-        PyObject *callback = PyList_GetItem(self->ready_q, 0);
-        if (!callback)
-            return NULL;
-        Py_INCREF(callback);
-        if (PySequence_DelItem(self->ready_q, 0) < 0) {
+    while (self->running) {
+        while (PyList_Size(self->ready_q) > 0) {
+            PyObject *callback = PyList_GetItem(self->ready_q, 0);
+            if (!callback)
+                return NULL;
+            Py_INCREF(callback);
+            if (PySequence_DelItem(self->ready_q, 0) < 0) {
+                Py_DECREF(callback);
+                return NULL;
+            }
+
+            PyObject *res = PyObject_CallNoArgs(callback);
             Py_DECREF(callback);
+            if (!res)
+                return NULL;
+            Py_DECREF(res);
+        }
+
+        if (!self->running)
+            break;
+
+        int have_watchers = 0;
+        for (int i = 0; i < self->fdcap; i++) {
+            FDCallback *s = self->fdmap[i];
+            if (s && (s->reader || s->writer)) {
+                have_watchers = 1;
+                break;
+            }
+        }
+        if (!have_watchers)
+            break;
+
+        int n;
+        Py_BEGIN_ALLOW_THREADS
+        n = epoll_wait(self->epfd, evs, 64, -1);
+        Py_END_ALLOW_THREADS
+        if (n == -1) {
+            PyErr_SetFromErrno(PyExc_OSError);
+            self->running = 0;
             return NULL;
         }
 
-        PyObject *res = PyObject_CallNoArgs(callback);
-        Py_DECREF(callback);
-        if (!res)
-            return NULL;
-        Py_DECREF(res);
+        for (int i = 0; i < n; i++) {
+            int fd = (int)evs[i].data.u32;
+            if (fd >= self->fdcap)
+                continue;
+            FDCallback *slot = self->fdmap[fd];
+            if (!slot)
+                continue;
+            if ((evs[i].events & EPOLLIN) && slot->reader) {
+                if (PyList_Append(self->ready_q, slot->reader) < 0)
+                    return NULL;
+            }
+            if ((evs[i].events & EPOLLOUT) && slot->writer) {
+                if (PyList_Append(self->ready_q, slot->writer) < 0)
+                    return NULL;
+            }
+        }
     }
 
     self->running = 0;
