@@ -22,6 +22,20 @@ socket_write_now(int fd, OutBuf *ob)
     return 0; /* complete */
 }
 
+static OutBuf *
+outbuf_new(void)
+{
+    OutBuf *ob = calloc(1, sizeof(OutBuf));
+    if (!ob)
+        return NULL;
+    ob->waiters = PyList_New(0);
+    if (!ob->waiters) {
+        free(ob);
+        return NULL;
+    }
+    return ob;
+}
+
 static int
 loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
 {
@@ -203,6 +217,54 @@ loop_remove_writer(PyEventLoopObject *self, PyObject *arg)
 }
 
 static PyObject *
+loop_c_write(PyEventLoopObject *self, PyObject *args)
+{
+    int fd;
+    Py_buffer buf;
+    if (!PyArg_ParseTuple(args, "iy*:write", &fd, &buf))
+        return NULL;
+    if (ensure_fdslot(self, fd) < 0) {
+        PyBuffer_Release(&buf);
+        return NULL;
+    }
+    FDCallback *slot = self->fdmap[fd];
+    if (!slot->obuf) {
+        slot->obuf = outbuf_new();
+        if (!slot->obuf) {
+            PyBuffer_Release(&buf);
+            return NULL;
+        }
+    }
+    OutBuf *ob = slot->obuf;
+    char *newdata = realloc(ob->data, ob->len + buf.len);
+    if (!newdata) {
+        PyBuffer_Release(&buf);
+        PyErr_NoMemory();
+        return NULL;
+    }
+    memcpy(newdata + ob->len, buf.buf, buf.len);
+    ob->data = newdata;
+    ob->len += buf.len;
+    PyBuffer_Release(&buf);
+
+    int res = socket_write_now(fd, ob);
+    if (res == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
+    if (res == 1) {
+        int op = (slot->reader || slot->writer) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+        uint32_t events = EPOLLET | EPOLLOUT | (slot->reader ? EPOLLIN : 0);
+        struct epoll_event ev = {.events = events, .data.u32 = (uint32_t)fd};
+        if (epoll_ctl(self->epfd, op, fd, &ev) == -1) {
+            PyErr_SetFromErrno(PyExc_OSError);
+            return NULL;
+        }
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 {
     self->running = 1;
@@ -283,6 +345,8 @@ static PyMethodDef loop_methods[] = {
      PyDoc_STR("Register a writer callback for a file descriptor")},
     {"remove_writer", (PyCFunction)loop_remove_writer, METH_O,
      PyDoc_STR("Remove writer callback for a file descriptor")},
+    {"_c_write", (PyCFunction)loop_c_write, METH_VARARGS,
+     PyDoc_STR("Low level write with buffering")},
     {"run_forever", (PyCFunction)loop_run_forever, METH_NOARGS,
      PyDoc_STR("Run callbacks until queue is empty")},
     {NULL, NULL, 0, NULL}
