@@ -9,6 +9,7 @@ typedef struct {
     int epfd;
     PyObject *ready_q;
     PyObject *timers;
+    int running;
 } PyEventLoopObject;
 
 #endif // CASYNCIO_LOOP_H
