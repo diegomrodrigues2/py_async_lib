@@ -5,8 +5,16 @@
 #include <sys/epoll.h>
 
 typedef struct {
+    char *data;
+    Py_ssize_t len;
+    Py_ssize_t pos;
+    PyObject *waiters;
+} OutBuf;
+
+typedef struct {
     PyObject *reader;
     PyObject *writer;
+    OutBuf *obuf;
 } FDCallback;
 
 typedef struct {
