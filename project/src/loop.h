@@ -5,10 +5,17 @@
 #include <sys/epoll.h>
 
 typedef struct {
+    PyObject *reader;
+    PyObject *writer;
+} FDCallback;
+
+typedef struct {
     PyObject_HEAD
     int epfd;
     PyObject *ready_q;
     PyObject *timers;
+    FDCallback **fdmap;
+    int fdcap;
     int running;
 } PyEventLoopObject;
 

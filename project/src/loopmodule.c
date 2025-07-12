@@ -2,6 +2,7 @@
 #include <structmember.h>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 static int
 loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
@@ -19,6 +20,9 @@ loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
     if (!self->timers)
         return -1;
 
+    self->fdmap = NULL;
+    self->fdcap = 0;
+
     self->running = 0;
 
     return 0;
@@ -29,9 +33,37 @@ loop_dealloc(PyEventLoopObject *self)
 {
     if (self->epfd != -1)
         close(self->epfd);
+    if (self->fdmap) {
+        for (int i = 0; i < self->fdcap; i++) {
+            FDCallback *slot = self->fdmap[i];
+            if (!slot)
+                continue;
+            Py_XDECREF(slot->reader);
+            Py_XDECREF(slot->writer);
+            free(slot);
+        }
+        free(self->fdmap);
+    }
     Py_XDECREF(self->ready_q);
     Py_XDECREF(self->timers);
     Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int
+ensure_fdslot(PyEventLoopObject *self, int fd)
+{
+    if (fd >= self->fdcap) {
+        PyErr_SetString(PyExc_RuntimeError, "fdslot not allocated");
+        return -1;
+    }
+    if (!self->fdmap[fd]) {
+        self->fdmap[fd] = calloc(1, sizeof(FDCallback));
+        if (!self->fdmap[fd]) {
+            PyErr_NoMemory();
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static PyObject *
@@ -40,6 +72,70 @@ loop_call_soon(PyEventLoopObject *self, PyObject *arg)
     if (PyList_Append(self->ready_q, arg) < 0)
         return NULL;
     Py_RETURN_NONE;
+}
+
+static PyObject *
+loop_add_reader(PyEventLoopObject *self, PyObject *args)
+{
+    int fd;
+    PyObject *cb;
+    if (!PyArg_ParseTuple(args, "iO:add_reader", &fd, &cb))
+        return NULL;
+    if (!PyCallable_Check(cb)) {
+        PyErr_SetString(PyExc_TypeError, "callback must be callable");
+        return NULL;
+    }
+    if (ensure_fdslot(self, fd) < 0)
+        return NULL;
+    FDCallback *slot = self->fdmap[fd];
+    Py_XINCREF(cb);
+    Py_XDECREF(slot->reader);
+    slot->reader = cb;
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+loop_remove_reader(PyEventLoopObject *self, PyObject *arg)
+{
+    int fd = PyLong_AsLong(arg);
+    if (fd == -1 && PyErr_Occurred())
+        return NULL;
+    if (fd >= self->fdcap || !self->fdmap[fd] || !self->fdmap[fd]->reader)
+        Py_RETURN_FALSE;
+    Py_CLEAR(self->fdmap[fd]->reader);
+    Py_RETURN_TRUE;
+}
+
+static PyObject *
+loop_add_writer(PyEventLoopObject *self, PyObject *args)
+{
+    int fd;
+    PyObject *cb;
+    if (!PyArg_ParseTuple(args, "iO:add_writer", &fd, &cb))
+        return NULL;
+    if (!PyCallable_Check(cb)) {
+        PyErr_SetString(PyExc_TypeError, "callback must be callable");
+        return NULL;
+    }
+    if (ensure_fdslot(self, fd) < 0)
+        return NULL;
+    FDCallback *slot = self->fdmap[fd];
+    Py_XINCREF(cb);
+    Py_XDECREF(slot->writer);
+    slot->writer = cb;
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+loop_remove_writer(PyEventLoopObject *self, PyObject *arg)
+{
+    int fd = PyLong_AsLong(arg);
+    if (fd == -1 && PyErr_Occurred())
+        return NULL;
+    if (fd >= self->fdcap || !self->fdmap[fd] || !self->fdmap[fd]->writer)
+        Py_RETURN_FALSE;
+    Py_CLEAR(self->fdmap[fd]->writer);
+    Py_RETURN_TRUE;
 }
 
 static PyObject *
