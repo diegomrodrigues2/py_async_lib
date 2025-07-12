@@ -17,6 +17,8 @@ typedef struct {
     OutBuf *obuf;
 } FDCallback;
 
+int socket_write_now(int fd, OutBuf *ob);
+
 typedef struct {
     PyObject_HEAD
     int epfd;
