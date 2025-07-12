@@ -323,9 +323,44 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
                 if (PyList_Append(self->ready_q, slot->reader) < 0)
                     return NULL;
             }
-            if ((evs[i].events & EPOLLOUT) && slot->writer) {
-                if (PyList_Append(self->ready_q, slot->writer) < 0)
-                    return NULL;
+            if (evs[i].events & EPOLLOUT) {
+                if (slot->obuf) {
+                    int r = socket_write_now(fd, slot->obuf);
+                    if (r == -1) {
+                        PyErr_SetFromErrno(PyExc_OSError);
+                        return NULL;
+                    }
+                    if (slot->obuf->pos >= slot->obuf->len) {
+                        free(slot->obuf->data);
+                        slot->obuf->data = NULL;
+                        slot->obuf->len = slot->obuf->pos = 0;
+
+                        Py_ssize_t nw = PyList_Size(slot->obuf->waiters);
+                        for (Py_ssize_t j = 0; j < nw; j++) {
+                            PyObject *fut = PyList_GetItem(slot->obuf->waiters, j);
+                            if (!fut)
+                                return NULL;
+                            PyObject *res = PyObject_CallMethod(fut, "set_result", "O", Py_None);
+                            Py_XDECREF(res);
+                        }
+                        if (PyList_SetSlice(slot->obuf->waiters, 0, nw, NULL) < 0)
+                            return NULL;
+
+                        if (!slot->writer) {
+                            uint32_t events = EPOLLET | (slot->reader ? EPOLLIN : 0);
+                            int op = events ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+                            struct epoll_event ev = {.events = events, .data.u32 = (uint32_t)fd};
+                            if (epoll_ctl(self->epfd, op, fd, &ev) == -1) {
+                                PyErr_SetFromErrno(PyExc_OSError);
+                                return NULL;
+                            }
+                        }
+                    }
+                }
+                if (slot->writer) {
+                    if (PyList_Append(self->ready_q, slot->writer) < 0)
+                        return NULL;
+                }
             }
         }
     }
