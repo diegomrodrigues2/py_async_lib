@@ -1,8 +1,26 @@
 #include "loop.h"
 #include <structmember.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+
+int
+socket_write_now(int fd, OutBuf *ob)
+{
+    while (ob->pos < ob->len) {
+        ssize_t n = send(fd, ob->data + ob->pos, ob->len - ob->pos,
+                          MSG_NOSIGNAL);
+        if (n == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return 1; /* pending */
+            return -1;     /* fatal */
+        }
+        ob->pos += n;
+    }
+    return 0; /* complete */
+}
 
 static int
 loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
