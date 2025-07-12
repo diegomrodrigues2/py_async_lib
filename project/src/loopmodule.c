@@ -251,6 +251,14 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 static PyMethodDef loop_methods[] = {
     {"call_soon", (PyCFunction)loop_call_soon, METH_O,
      PyDoc_STR("Schedule a callback to run soon")},
+    {"add_reader", (PyCFunction)loop_add_reader, METH_VARARGS,
+     PyDoc_STR("Register a reader callback for a file descriptor")},
+    {"remove_reader", (PyCFunction)loop_remove_reader, METH_O,
+     PyDoc_STR("Remove reader callback for a file descriptor")},
+    {"add_writer", (PyCFunction)loop_add_writer, METH_VARARGS,
+     PyDoc_STR("Register a writer callback for a file descriptor")},
+    {"remove_writer", (PyCFunction)loop_remove_writer, METH_O,
+     PyDoc_STR("Remove writer callback for a file descriptor")},
     {"run_forever", (PyCFunction)loop_run_forever, METH_NOARGS,
      PyDoc_STR("Run callbacks until queue is empty")},
     {NULL, NULL, 0, NULL}
