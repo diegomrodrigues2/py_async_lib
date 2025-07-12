@@ -40,6 +40,11 @@ loop_dealloc(PyEventLoopObject *self)
                 continue;
             Py_XDECREF(slot->reader);
             Py_XDECREF(slot->writer);
+            if (slot->obuf) {
+                free(slot->obuf->data);
+                Py_XDECREF(slot->obuf->waiters);
+                free(slot->obuf);
+            }
             free(slot);
         }
         free(self->fdmap);
@@ -72,6 +77,7 @@ ensure_fdslot(PyEventLoopObject *self, int fd)
             PyErr_NoMemory();
             return -1;
         }
+        self->fdmap[fd]->obuf = NULL;
     }
     return 0;
 }

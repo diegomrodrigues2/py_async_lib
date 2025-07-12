@@ -8,3 +8,7 @@ Run the small loop demo in `examples/printer.py`:
 ```bash
 PYTHONPATH=. python examples/printer.py
 ```
+
+### Development progress
+
+The C event loop now includes an `OutBuf` structure for managing pending writes.
