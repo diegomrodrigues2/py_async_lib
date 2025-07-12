@@ -53,8 +53,18 @@ static int
 ensure_fdslot(PyEventLoopObject *self, int fd)
 {
     if (fd >= self->fdcap) {
-        PyErr_SetString(PyExc_RuntimeError, "fdslot not allocated");
-        return -1;
+        int newcap = self->fdcap ? self->fdcap : 8;
+        while (newcap <= fd)
+            newcap *= 2;
+        FDCallback **newmap = realloc(self->fdmap, newcap * sizeof(FDCallback *));
+        if (!newmap) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        for (int i = self->fdcap; i < newcap; i++)
+            newmap[i] = NULL;
+        self->fdmap = newmap;
+        self->fdcap = newcap;
     }
     if (!self->fdmap[fd]) {
         self->fdmap[fd] = calloc(1, sizeof(FDCallback));
