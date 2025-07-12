@@ -20,6 +20,29 @@ class MiniLoop:
         when = time.time() + delay
         heapq.heappush(self.timers, (when, coro))
 
+    def run(self):
+        """Run tasks and timers until none remain."""
+        while self.ready or self.timers:
+            if not self.ready:
+                when, coro = heapq.heappop(self.timers)
+                delay = when - time.time()
+                if delay > 0:
+                    time.sleep(delay)
+                self.ready.append(coro)
+
+            coro = self.ready.popleft()
+            try:
+                result = coro.send(None)
+            except StopIteration:
+                continue
+
+            if isinstance(result, (int, float)):
+                self.call_later(result, coro)
+            else:
+                if result is not None:
+                    self.create_task(result)
+                self.ready.append(coro)
+
 
 def sleep(delay):
     """Coroutine that yields control back to the loop for ``delay`` seconds."""
