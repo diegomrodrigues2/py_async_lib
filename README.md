@@ -84,6 +84,34 @@ stateDiagram
 
 ### Sequence Diagram: Fluxo de `loop._c_write` e Escrita em C
 
+````mermaid
+sequenceDiagram
+    participant PyUser as Código Python
+    participant Loop as EventLoop
+    participant Ensure as ensure_fdslot
+    participant OutBuf as OutBuf
+    participant Socket as socket_write_now
+    participant EpollCtl as epoll_ctl
+    participant EpollWait as epoll_wait
+
+    PyUser->>Loop: loop._c_write(fd, buffer)
+    Loop->>Ensure: ensure_fdslot(fd)
+    Ensure-->>Loop: slot preparado
+    alt OutBuf não existente
+        Loop->>OutBuf: outbuf_new()
+        OutBuf-->>Loop: OutBuf retornado
+    end
+    Loop->>Socket: socket_write_now(fd, OutBuf)
+    alt dados pendentes
+        Socket-->>Loop: retorna 1 (pending)
+        Loop->>EpollCtl: epoll_ctl(ADD/MOD, fd, EPOLLOUT)
+        EpollCtl-->>Loop: OK
+        Loop->>EpollWait: epoll_wait bloqueante
+        EpollWait-->>Loop: EPOLLOUT evento
+        Loop->>Socket: socket_write_now(fd, OutBuf)
+    else completo
+        Socket-->>Loop: retorna 0 (complete)
+    end
 ```mermaid
 sequenceDiagram
     participant PyUser as Código Python
@@ -112,7 +140,7 @@ sequenceDiagram
     else completo
         Socket-->>Loop: retorna 0 (complete)
     end
-```
+````
 
 1. **Python user code** chama funções no pacote `py_async_lib`.
 2. **py\_async\_lib** faz binding para o loop em C (`casyncio`).
