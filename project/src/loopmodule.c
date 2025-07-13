@@ -5,6 +5,9 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <signal.h>
+#include <sys/signalfd.h>
+#include <pthread.h>
 
 int
 socket_write_now(int fd, OutBuf *ob)
@@ -55,6 +58,26 @@ loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
     self->fdmap = NULL;
     self->fdcap = 0;
 
+    sigemptyset(&self->sigmask);
+    sigaddset(&self->sigmask, SIGINT);
+    sigaddset(&self->sigmask, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &self->sigmask, NULL);
+    self->sfd = signalfd(-1, &self->sigmask, SFD_CLOEXEC | SFD_NONBLOCK);
+    if (self->sfd == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return -1;
+    }
+
+    self->signal_handlers = PyDict_New();
+    if (!self->signal_handlers)
+        return -1;
+
+    struct epoll_event ev = {.events = EPOLLIN, .data.u32 = (uint32_t)self->sfd};
+    if (epoll_ctl(self->epfd, EPOLL_CTL_ADD, self->sfd, &ev) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return -1;
+    }
+
     self->running = 0;
 
     return 0;
@@ -81,6 +104,9 @@ loop_dealloc(PyEventLoopObject *self)
         }
         free(self->fdmap);
     }
+    if (self->sfd != -1)
+        close(self->sfd);
+    Py_XDECREF(self->signal_handlers);
     Py_XDECREF(self->ready_q);
     Py_XDECREF(self->timers);
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -214,6 +240,25 @@ loop_remove_writer(PyEventLoopObject *self, PyObject *arg)
         return NULL;
     }
     Py_RETURN_TRUE;
+}
+
+static PyObject *
+loop_add_signal_handler(PyEventLoopObject *self, PyObject *args)
+{
+    int signo;
+    PyObject *cb;
+    if (!PyArg_ParseTuple(args, "iO:add_signal_handler", &signo, &cb))
+        return NULL;
+    if (!PyCallable_Check(cb)) {
+        PyErr_SetString(PyExc_TypeError, "callback must be callable");
+        return NULL;
+    }
+    PyObject *key = PyLong_FromLong(signo);
+    int r = PyDict_SetItem(self->signal_handlers, key, cb);
+    Py_DECREF(key);
+    if (r < 0)
+        return NULL;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -352,6 +397,21 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 
         for (int i = 0; i < n; i++) {
             int fd = (int)evs[i].data.u32;
+            if (fd == self->sfd) {
+                struct signalfd_siginfo si;
+                while (read(self->sfd, &si, sizeof(si)) == sizeof(si)) {
+                    PyObject *key = PyLong_FromLong((long)si.ssi_signo);
+                    PyObject *cb = PyDict_GetItemWithError(self->signal_handlers, key);
+                    Py_DECREF(key);
+                    if (cb) {
+                        if (PyList_Append(self->ready_q, cb) < 0)
+                            return NULL;
+                    } else if (PyErr_Occurred()) {
+                        return NULL;
+                    }
+                }
+                continue;
+            }
             if (fd >= self->fdcap)
                 continue;
             FDCallback *slot = self->fdmap[fd];
@@ -407,6 +467,13 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
     Py_RETURN_NONE;
 }
 
+static PyObject *
+loop_stop(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
+{
+    self->running = 0;
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef loop_methods[] = {
     {"call_soon", (PyCFunction)loop_call_soon, METH_O,
      PyDoc_STR("Schedule a callback to run soon")},
@@ -418,13 +485,17 @@ static PyMethodDef loop_methods[] = {
      PyDoc_STR("Register a writer callback for a file descriptor")},
     {"remove_writer", (PyCFunction)loop_remove_writer, METH_O,
      PyDoc_STR("Remove writer callback for a file descriptor")},
+    {"add_signal_handler", (PyCFunction)loop_add_signal_handler, METH_VARARGS,
+     PyDoc_STR("Register a callback for a signal")},
     {"_c_write", (PyCFunction)loop_c_write, METH_VARARGS,
      PyDoc_STR("Low level write with buffering")},
     {"_c_drain_waiter", (PyCFunction)loop_c_drain_waiter, METH_O,
      PyDoc_STR("Return Future resolved when buffer drained")},
     {"run_forever", (PyCFunction)loop_run_forever, METH_NOARGS,
      PyDoc_STR("Run callbacks until queue is empty")},
-    {NULL, NULL, 0, NULL}
+    {"stop", (PyCFunction)loop_stop, METH_NOARGS,
+     PyDoc_STR("Stop the running loop")},
+    {NULL, NULL, 0, NULL},
 };
 
 static PyTypeObject PyEventLoop_Type = {

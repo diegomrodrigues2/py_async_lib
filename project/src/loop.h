@@ -26,6 +26,9 @@ typedef struct {
     PyObject *timers;
     FDCallback **fdmap;
     int fdcap;
+    sigset_t sigmask;
+    int sfd;
+    PyObject *signal_handlers;
     int running;
 } PyEventLoopObject;
 
