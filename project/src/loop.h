@@ -11,6 +11,12 @@ typedef struct {
     PyObject *waiters;
 } OutBuf;
 
+typedef struct TimerNode {
+    double when;
+    PyObject *coro;
+    struct TimerNode *next;
+} TimerNode;
+
 typedef struct {
     PyObject *reader;
     PyObject *writer;
