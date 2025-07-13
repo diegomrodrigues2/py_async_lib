@@ -1,125 +1,195 @@
-# py\_async\_lib
+An updated `README.md` file for `py_async_lib` with in-depth explanations and Mermaid diagrams is provided below.
 
-Minha própria implementação personalizada da biblioteca asyncio a partir do zero, usando Wrappers em C e Python.
+# py_async_lib
 
-## Benchmark
+A custom implementation of the Python `asyncio` library from scratch, featuring a high-performance event loop written in C.
 
-Você pode comparar a taxa de transferência do loop de eventos do projeto contra o loop `asyncio` embutido do Python com o script de benchmark:
+This project is an exploration into the low-level details of asynchronous programming, bridging Python's usability with C's performance. It replaces Python's default event loop with a custom `epoll`-based scheduler to handle I/O, timers, and signals efficiently.
 
-```bash
-PYTHONPATH=. python -m benchmarks.throughput  # exibe tempos de execução em segundos
+## 📚 Architecture Overview
+
+The library is composed of a Python frontend and a C backend. The Python layer provides a user-friendly API that mirrors `asyncio`, while the C extension (`casyncio`) implements the core event loop for maximum performance.
+
+```mermaid
+graph TD
+    subgraph Python Space
+        A[Python User Code 🐍] --> B(py_async_lib package);
+        B --> |installs policy| C(asyncio);
+        C --> |creates| D{asyncio tasks/futures 🗝};
+    end
+
+    subgraph C Extension
+        E[casyncio.EventLoop ⚙️] --> |manages| F(epoll);
+        E --> |executes| G[Callbacks];
+    end
+
+    B --> |calls into| E;
+    G --> |sets result on| D;
+
+    style A fill:#F9F,stroke:#333,stroke-width:2px
+    style B fill:#F9F,stroke:#333,stroke-width:2px
+    style C fill:#F9F,stroke:#333,stroke-width:2px
+    style D fill:#F9F,stroke:#333,stroke-width:2px
+    style E fill:#9FF,stroke:#333,stroke-width:2px
+    style F fill:#9FF,stroke:#333,stroke-width:2px
+    style G fill:#9FF,stroke:#333,stroke-width:2px
 ```
 
-Para usar o loop em C de alto desempenho com asyncio:
+*   **Python User Code**: Your `async/await` code that uses the library.
+*   **py_async_lib package**: The main Python package that provides the public API, such as `StreamWriter` and the `install()` function.
+*   **asyncio tasks/futures**: Standard `asyncio` objects that represent the result of an asynchronous operation.
+*   **casyncio.EventLoop**: The C implementation of the event loop that polls for I/O readiness using `epoll`.
+*   **Callbacks**: Python functions scheduled to run when a specific event occurs (e.g., data received on a socket).
+
+## 🔄 Data Flow: A Write Operation
+
+This diagram shows the sequence of events when a user writes data to a stream.
+
+```mermaid
+sequenceDiagram
+    participant User as Python Coroutine
+    participant SW as StreamWriter
+    participant Loop as casyncio.EventLoop
+    participant OS as Kernel (epoll)
+
+    User->>SW: write(b"data")
+    SW->>Loop: _c_write(fd, b"data")
+    Loop->>Loop: Append data to OutBuf
+    Loop->>OS: send(fd, b"data")
+    alt Send is incomplete (EAGAIN)
+        OS-->>Loop: Returns partial write
+        Loop->>OS: epoll_ctl(ADD, EPOLLOUT)
+    else Send is complete
+        OS-->>Loop: Returns full write count
+    end
+
+    User->>SW: await drain()
+    SW->>Loop: _c_drain_waiter(fd)
+    alt Buffer is already empty
+        Loop-->>SW: Returns completed Future
+    else Buffer has pending data
+        Loop-->>SW: Returns pending Future
+    end
+    SW-->>User: Awaits Future
+
+    OS->>Loop: EPOLLOUT event
+    Loop->>Loop: socket_write_now()
+    note right of Loop: Drain remaining data from OutBuf
+    Loop->>Loop: Set result on pending Future
+```
+
+1.  A coroutine calls `StreamWriter.write()`.
+2.  The `StreamWriter` calls the loop's internal `_c_write` method, passing the file descriptor and data.
+3.  The C loop attempts a non-blocking `send()`.
+4.  If the kernel buffer is full, `send()` returns `EAGAIN`. The loop registers the file descriptor with `epoll` to be notified when it's ready for writing (`EPOLLOUT`).
+5.  The `drain()` method creates a `Future` that will be resolved once the buffer is empty.
+6.  When `epoll` reports the socket is writable, the loop writes the remaining data and resolves the `Future`.
+
+## 📊 Event Loop State
+
+The event loop operates as a simple state machine.
+
+```mermaid
+stateDiagram-v2
+    [*] --> INIT
+    INIT --> RUNNING: run_forever()
+    RUNNING --> RUNNING: Processing I/O and callbacks
+    RUNNING --> STOPPED: stop() or no more tasks
+
+    state RUNNING {
+        direction LR
+        [*] --> POLLING
+        POLLING --> READY : epoll_wait() returns events
+        READY --> POLLING : Execute ready callbacks
+    }
+
+    STOPPED --> [*]
+```
+
+*   **INIT**: The initial state after `casyncio.EventLoop()` is created.
+*   **RUNNING**: The loop enters this state when `run_forever()` is called. It continuously polls `epoll` for events and runs callbacks from its ready queue.
+*   **STOPPED**: The `stop()` method sets a flag that causes the loop to exit the `RUNNING` state. The loop also stops if it has no more timers or I/O watchers to handle.
+
+## ⚙️ Core C Structures
+
+The relationships between the main C structures are key to the library's efficiency.
+
+```mermaid
+erDiagram
+    PyEventLoopObject {
+        int epfd
+        PyObject ready_q
+        PyObject timers
+        FDCallback fdmap
+        int sfd
+        PyObject signal_handlers
+        int running
+    }
+
+    FDCallback {
+        PyObject reader
+        PyObject writer
+        OutBuf obuf
+    }
+
+    OutBuf {
+        char data
+        Py_ssize_t len
+        Py_ssize_t pos
+        PyObject waiters
+    }
+
+    PyEventLoopObject ||--o{ FDCallback : "manages for each fd"
+    FDCallback ||--o| OutBuf : "has one"
+```
+
+*   **`PyEventLoopObject`**: The central object that holds the `epoll` file descriptor (`epfd`), the queue of ready callbacks (`ready_q`), and a map of file descriptors to their corresponding callbacks (`fdmap`).
+*   **`FDCallback`**: Stores the `reader` and `writer` callbacks for a single file descriptor.
+*   **`OutBuf`**: A write buffer associated with an `FDCallback`. It holds the data to be written and a list of `Future` objects (`waiters`) to be notified upon successful drainage.
+
+## 🚀 Benchmark
+
+You can compare the throughput of the project's event loop against Python's built-in `asyncio` loop with the benchmark script:
+
+```bash
+PYTHONPATH=. python -m benchmarks.throughput
+```
+
+To use the high-performance C loop with `asyncio` in your own project:
 
 ```python
 import py_async_lib
+import asyncio
 
+# Sets the default asyncio policy to use casyncio
 py_async_lib.install()
+
+# Now, any call to asyncio.new_event_loop() will return a casyncio.EventLoop
+loop = asyncio.new_event_loop()
 ```
 
-### Executando os testes
+### 🧪 Running tests
 
-Instale o pacote no modo editável e execute a suíte de testes com `pytest`:
+Install the package in editable mode and run the test suite with `pytest`:
 
 ```bash
 pip install -e .
 pytest
 ```
 
-Os testes cobrem cada marco das issues **#1** a **#9**, incluindo o loop Python, o esqueleto em C, I/O watchers, helpers de subprocess e tratamento de sinais.
+The tests cover each development milestone, from the initial Python prototype to the C event loop, I/O watchers, and signal handling.
 
----
+### 📈 Development Progress
 
-## 📚 Visão Geral da Arquitetura
+The development of the C event loop is tracked through a series of issues, each representing a distinct feature:
 
-A seguir, diagramas Mermaid ilustram como as peças se encaixam.
-
-### ER Diagram (Entidades e Relacionamentos)
-
-```mermaid
-erDiagram
-    PYTHON_USER_CODE ||--o{ PY_ASYNC_LIB : calls
-    PY_ASYNC_LIB ||--|| CASYNCIO : binds
-    CASYNCIO ||--o{ ASYNCIO_TASKS : schedules
-```
-
-### Sequence Diagram (Fluxo de Chamadas)
-
-```mermaid
-sequenceDiagram
-    participant User as Python user code 🐍
-    participant Lib as py_async_lib package 📦
-    participant CLoop as casyncio (C) ⚙️
-    participant Tasks as asyncio tasks/futures 🔑
-
-    User->>Lib: import & chamadas de API
-    Lib->>CLoop: install(), create_event_loop()
-    Lib->>CLoop: StreamWriter.write(data)
-    CLoop->>CLoop: epoll_wait() (monitoramento de I/O)
-    CLoop-->>Tasks: expedites callbacks
-    Tasks->>Lib: executa callback Python
-```
-
-### State Diagram (Estados do Loop de Eventos)
-
-```mermaid
-stateDiagram
-    [*] --> INIT : novo loop
-    INIT --> RUNNING : run_forever()
-    RUNNING --> STOPPED : stop()
-    STOPPED --> [*]
-```
-
----
-
-## Como Funciona
-
-1. **Python user code** chama funções no pacote `py_async_lib`.
-2. **py\_async\_lib** faz binding para o loop em C (`casyncio`).
-3. **casyncio** gerencia um loop baseado em `epoll`, integrando timers, I/O e sinais.
-4. Callbacks são enfileirados em **asyncio tasks/futures** para execução no contexto Python.
-
----
-
-### Sequence Diagram: loop.\_c\_write
-
-```mermaid
-sequenceDiagram
-    participant PyUser as Python
-    participant Loop as EventLoop
-    participant Slot as ensure_fdslot
-    participant Buffer as OutBuf
-    participant Writer as socket_write_now
-    participant Epoll as epoll_ctl
-
-    PyUser->>Loop: chama _c_write
-    Loop->>Slot: ensure_fdslot(fd)
-    Slot-->>Loop: retorna slot
-    alt Buffer inexistente
-        Loop->>Buffer: outbuf_new()
-        Buffer-->>Loop: retorna obuf
-    end
-    Loop->>Writer: socket_write_now(fd, obuf)
-    alt precisa aguardar
-        Writer-->>Loop: retorno 1 (pending)
-        Loop->>Epoll: epoll_ctl(ADD/MOD, fd, EPOLLOUT)
-    else completou
-        Writer-->>Loop: retorno 0 (complete)
-    end
-```
-
----
-
-## Progresso de Desenvolvimento
-
-* Estrutura inicial em Python e testes básicos (#1).
-* Esqueleto em C, configuração de build (#2).
-* `call_soon`, `run_forever` (#3).
-* Temporizadores (`call_later`) (#4).
-* Integração de I/O com `epoll` (#5).
-* Escrita não bloqueante e back-pressure (#6).
-* Cancelamento de tarefas e timeouts (#7).
-* Tratamento de sinais e subprocessos (#8).
-* Compatibilidade total com `asyncio` (#9).
-* Otimizações finais e perfilamento (#10).
+*   **#1**: A prototype of a micro event loop purely in Python.
+*   **#2**: The initial C skeleton, object structure, and build configuration.
+*   **#3**: Implementation of `call_soon` and `run_forever`.
+*   **#4**: Timer support via `call_later`.
+*   **#5**: I/O integration using `epoll`.
+*   **#6**: Handling of non-blocking writes and back-pressure.
+*   **#7**: Support for task cancellation and timeouts.
+*   **#8**: Management of OS signals and subprocesses.
+*   **#9**: Full compatibility with the `asyncio` event loop policy.
+*   **#10**: Profiling and final optimizations.
