@@ -5,5 +5,6 @@ from benchmarks.throughput import bench
 
 
 def test_bench_runs_quickly():
-    duration = bench(10)
-    assert duration >= 0
+    cas, std = bench(10)
+    assert cas >= 0
+    assert std >= 0

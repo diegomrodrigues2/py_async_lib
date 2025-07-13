@@ -1,18 +1,13 @@
 # py_async_lib
 My own custom implementation of the Ansycio library from scratch using C Wrappers and Python
 
-## Example
+## Benchmark
 
-Run the small loop demo in `examples/printer.py`:
-
-```bash
-PYTHONPATH=. python examples/printer.py
-```
-
-You can measure the loop's raw throughput with the benchmark script:
+You can compare the throughput of the project's event loop against
+Python's built in `asyncio` loop with the benchmark script:
 
 ```bash
-PYTHONPATH=. python -m benchmarks.throughput  # prints runtime in seconds
+PYTHONPATH=. python -m benchmarks.throughput  # prints runtimes in seconds
 ```
 
 To use the high performance C loop with asyncio:
