@@ -13,8 +13,9 @@ int
 socket_write_now(int fd, OutBuf *ob)
 {
     while (ob->pos < ob->len) {
-        ssize_t n = send(fd, ob->data + ob->pos, ob->len - ob->pos,
-                          MSG_NOSIGNAL);
+        const char *buf = ob->data + ob->pos;
+        size_t remaining = ob->len - ob->pos;
+        ssize_t n = send(fd, buf, remaining, MSG_NOSIGNAL);
         if (n == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 return 1; /* pending */
