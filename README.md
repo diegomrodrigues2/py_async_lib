@@ -1,77 +1,138 @@
-# py_async_lib
-My own custom implementation of the Ansycio library from scratch using C Wrappers and Python
+# 🌀 `py_async_lib`
 
-## Benchmark
+Uma implementação própria da biblioteca `asyncio` feita do zero, com wrappers em C e Python.
 
-You can compare the throughput of the project's event loop against
-Python's built in `asyncio` loop with the benchmark script:
+## 🚀 Benchmark
+
+Compare a performance do loop de eventos do projeto com o `asyncio` nativo:
 
 ```bash
-PYTHONPATH=. python -m benchmarks.throughput  # prints runtimes in seconds
+PYTHONPATH=. python -m benchmarks.throughput  # imprime tempos de execução em segundos
 ```
 
-To use the high performance C loop with asyncio:
+Para usar o loop de alto desempenho:
 
 ```python
 import py_async_lib
-
 py_async_lib.install()
 ```
 
-### Running tests
+---
 
-Install the package in editable mode and run the test suite with `pytest`:
+## 🧪 Testes
+
+Instale o pacote em modo editável e execute os testes com `pytest`:
 
 ```bash
 pip install -e .
 pytest
 ```
 
-The tests exercise each milestone from issues **#1** through **#9**, covering the
-Python mini loop, the C event loop skeleton, I/O watchers, subprocess helpers and
-signal handling.
+Os testes cobrem cada marco das issues **#1** a **#9**, abrangendo o mini loop em Python, o esqueleto C, I/O, subprocessos e sinais.
 
-### Development progress
+---
 
-The C event loop now includes an `OutBuf` structure for managing pending writes.
-Signalfd integrated
+## ⚙️ Arquitetura
 
-## 📚 Architecture Overview
+### 📦 Diagrama de Componentes
 
-The library binds a tiny C event loop to Python so you can run high-performance asynchronous code. Below are some diagrams showing how the pieces fit together.
+```mermaid
+componentDiagram
+    component Python [
+        Python 🐍
+    ]
+    component PyAsync [
+        py_async_lib
+    ]
+    component CLoop [
+        casyncio (C loop)
+    ]
+    component OS [
+        Kernel: epoll/signalfd
+    ]
 
-### 🏎️ Components
-
-```
-+-------------------+            +----------------------+
-| Python user code 🐍 | --calls--> | py_async_lib package |
-+-------------------+            +----------------------+
-        |                                   |
-        | FFI                                | callbacks
-        v                                   v
-+------------------+                 +------------------------+
-| casyncio (C) ⚙️ | <---> event loop data --> | asyncio tasks/futures 🗝|
-+------------------+                 +------------------------+
-```
-
-### 🔄 Data Flow
-
-```
-Python coroutine
-     |
-     v
-StreamWriter.write() ➡️ _c_write() (C) ➡️ epoll loop ➡️ callback queued ➡️ Future set
+    Python --> PyAsync : chamadas asyncio
+    PyAsync --> CLoop : FFI/callbacks
+    CLoop --> OS : epoll, sinais
 ```
 
-### 📊 Event Loop State
+---
 
+### 🔁 Diagrama de Sequência (StreamWriter)
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant StreamWriter
+    participant CLoop
+    participant OS
+
+    App->>StreamWriter: write(data)
+    StreamWriter->>CLoop: _c_write(fd, data)
+    CLoop->>OS: send(fd, data)
+    OS-->>CLoop: confirma escrita
+    CLoop->>CLoop: buffer atualizado
+    App->>StreamWriter: await drain()
+    StreamWriter->>CLoop: _c_drain_waiter(fd)
+    CLoop-->>App: Future resolvido
 ```
-[INIT 💪]
-   |
-   v
-[RUNNING ▶️]
-   |
-  stop
-   v
-[STOPPED ⏹]
+
+---
+
+### 📈 Fluxo de Dados
+
+```mermaid
+flowchart TD
+    A[Python Coroutine] --> B[StreamWriter.write()]
+    B --> C[_c_write() (C)]
+    C --> D[epoll loop]
+    D --> E[Callback]
+    E --> F[asyncio.Future set_result]
 ```
+
+---
+
+### 🧬 Diagrama de Estado do Event Loop
+
+```mermaid
+stateDiagram-v2
+    [*] --> INIT: Criado
+    INIT --> RUNNING: loop.run_forever()
+    RUNNING --> STOPPED: loop.stop()
+    STOPPED --> [*]
+```
+
+---
+
+## 🧩 Estrutura do Projeto
+
+```bash
+py_async_lib/
+├── stream_writer.py      # StreamWriter com write/drain
+├── policy.py             # Política asyncio customizada
+├── __init__.py           # Interface pública
+
+project/
+└── src/
+    ├── loop.h            # Definições do loop C
+    └── loopmodule.c      # Implementação do loop
+
+benchmarks/
+├── throughput.py         # Comparação com asyncio
+└── validate.py           # Runner de benchmark
+
+tests/
+└── test_casyncio.py      # Testes funcionais
+
+scripts/
+├── massif.sh             # Valgrind
+└── perf_flamegraph.sh    # Flamegraph via perf
+```
+
+---
+
+## 📌 Progresso
+
+* Event loop C implementado
+* `OutBuf` gerencia escrita pendente
+* `signalfd` integrado para lidar com sinais
