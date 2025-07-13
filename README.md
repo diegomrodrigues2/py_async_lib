@@ -40,3 +40,42 @@ signal handling.
 
 The C event loop now includes an `OutBuf` structure for managing pending writes.
 Signalfd integrated
+
+## 📚 Architecture Overview
+
+The library binds a tiny C event loop to Python so you can run high-performance asynchronous code. Below are some diagrams showing how the pieces fit together.
+
+### 🏎️ Components
+
+```mermaid
+graph LR
+    A["Python user code 🐍"] -->|uses| B(py_async_lib)
+    B --> C(MiniLoop)
+    B --> D(StreamWriter)
+    B --> E(Subprocess)
+    C -- FFI --> F(casyncio.EventLoop)
+    D -- calls --> F
+    E -- spawns --> F
+```
+
+### 🔄 Data Flow
+
+```mermaid
+graph TD
+    P[Python coroutine] --> W(StreamWriter.write)
+    W --> CEXT(_c_write in C)
+    CEXT --> EPOLL(epoll loop)
+    EPOLL --> CB[callback queued]
+    CB --> FUT[Future.set_result]
+```
+
+### 📊 Event Loop State
+
+```mermaid
+stateDiagram-v2
+    [*] --> INIT
+    INIT --> RUNNING : run_forever()
+    RUNNING --> RUNNING : callbacks/timers
+    RUNNING --> STOPPED : stop()
+    STOPPED --> [*]
+```
