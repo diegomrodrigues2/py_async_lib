@@ -9,6 +9,27 @@
 #include <sys/signalfd.h>
 #include <pthread.h>
 
+/* simple freelist for TimerNode allocations */
+static TimerNode *timer_freelist = NULL;
+
+static TimerNode *
+alloc_timer(void)
+{
+    TimerNode *t = timer_freelist;
+    if (t) {
+        timer_freelist = t->next;
+    } else {
+        t = PyMem_Malloc(sizeof(TimerNode));
+    }
+    return t;
+}
+
+static void
+free_timer(TimerNode *t)
+{
+    t->next = timer_freelist;
+    timer_freelist = t;
+}
 int
 socket_write_now(int fd, OutBuf *ob)
 {
