@@ -9,6 +9,12 @@ Run the small loop demo in `examples/printer.py`:
 PYTHONPATH=. python examples/printer.py
 ```
 
+You can measure the loop's raw throughput with the benchmark script:
+
+```bash
+PYTHONPATH=. python -m benchmarks.throughput  # prints runtime in seconds
+```
+
 To use the high performance C loop with asyncio:
 
 ```python
