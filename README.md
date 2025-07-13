@@ -82,42 +82,32 @@ stateDiagram
 
 ---
 
-### Sequence Diagram: Fluxo de `loop._c_write` e Escrita em C
+### Sequence Diagram: loop.\_c\_write
 
 ```mermaid
 sequenceDiagram
-    participant PyUser as Código Python
-    participant Loop as PyEventLoopObject
-    participant Ensure as ensure_fdslot()
-    participant OutBuf as outbuf_new()/OutBuf
-    participant Socket as socket_write_now()
-    participant EpollCtl as epoll_ctl
-    participant EpollWait as epoll_wait
+    participant PyUser as Python
+    participant Loop as EventLoop
+    participant Slot as ensure_fdslot
+    participant Buffer as OutBuf
+    participant Writer as socket_write_now
+    participant Epoll as epoll_ctl
 
-    PyUser->>Loop: loop._c_write(fd, buffer)
-    Loop->>Ensure: ensure_fdslot(fd)
-    Ensure-->>Loop: slot preparado
-    alt ob->obuf não existente
-        Loop->>OutBuf: outbuf_new()
-        OutBuf-->>Loop: OutBuf retornado
+    PyUser->>Loop: chama _c_write
+    Loop->>Slot: ensure_fdslot(fd)
+    Slot-->>Loop: retorna slot
+    alt Buffer inexistente
+        Loop->>Buffer: outbuf_new()
+        Buffer-->>Loop: retorna obuf
     end
-    Loop->>Socket: socket_write_now(fd, OutBuf)
-    alt dados pendentes
-        Socket-->>Loop: retorna 1 (pending)
-        Loop->>EpollCtl: epoll_ctl(ADD/MOD, fd, EPOLLOUT)
-        EpollCtl-->>Loop: OK
-        Loop->>EpollWait: epoll_wait bloqueante
-        EpollWait-->>Loop: EPOLLOUT evento
-        Loop->>Socket: socket_write_now(fd, OutBuf)
-    else completo
-        Socket-->>Loop: retorna 0 (complete)
+    Loop->>Writer: socket_write_now(fd, obuf)
+    alt precisa aguardar
+        Writer-->>Loop: retorno 1 (pending)
+        Loop->>Epoll: epoll_ctl(ADD/MOD, fd, EPOLLOUT)
+    else completou
+        Writer-->>Loop: retorno 0 (complete)
     end
 ```
-
-1. **Python user code** chama funções no pacote `py_async_lib`.
-2. **py\_async\_lib** faz binding para o loop em C (`casyncio`).
-3. **casyncio** gerencia um loop baseado em `epoll`, integrando timers, I/O e sinais.
-4. Callbacks são enfileirados em **asyncio tasks/futures** para execução no contexto Python.
 
 ---
 
