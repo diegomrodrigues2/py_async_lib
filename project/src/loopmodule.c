@@ -176,13 +176,26 @@ loop_create_task(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
     PyObject *tasks = PyImport_ImportModule("asyncio.tasks");
     if (!tasks)
         return NULL;
-    PyObject *func = PyObject_GetAttrString(tasks, "create_task");
+    PyObject *Task = PyObject_GetAttrString(tasks, "Task");
     Py_DECREF(tasks);
-    if (!func)
+    if (!Task)
         return NULL;
-    PyObject *res = PyObject_CallFunction(func, "OO", coro, self);
-    Py_DECREF(func);
-    return res;
+    PyObject *args_tuple = PyTuple_Pack(1, coro);
+    if (!args_tuple) {
+        Py_DECREF(Task);
+        return NULL;
+    }
+    PyObject *kw = Py_BuildValue("{s:O}", "loop", self);
+    if (!kw) {
+        Py_DECREF(Task);
+        Py_DECREF(args_tuple);
+        return NULL;
+    }
+    PyObject *task = PyObject_Call(Task, args_tuple, kw);
+    Py_DECREF(Task);
+    Py_DECREF(args_tuple);
+    Py_DECREF(kw);
+    return task;
 }
 
 static PyObject *
