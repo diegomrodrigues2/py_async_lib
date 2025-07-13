@@ -1,138 +1,96 @@
-# 🌀 `py_async_lib`
+# py\_async\_lib
 
-Uma implementação própria da biblioteca `asyncio` feita do zero, com wrappers em C e Python.
+Minha própria implementação personalizada da biblioteca asyncio a partir do zero, usando Wrappers em C e Python.
 
-## 🚀 Benchmark
+## Benchmark
 
-Compare a performance do loop de eventos do projeto com o `asyncio` nativo:
+Você pode comparar a taxa de transferência do loop de eventos do projeto contra o loop `asyncio` embutido do Python com o script de benchmark:
 
 ```bash
-PYTHONPATH=. python -m benchmarks.throughput  # imprime tempos de execução em segundos
+PYTHONPATH=. python -m benchmarks.throughput  # exibe tempos de execução em segundos
 ```
 
-Para usar o loop de alto desempenho:
+Para usar o loop em C de alto desempenho com asyncio:
 
 ```python
 import py_async_lib
+
 py_async_lib.install()
 ```
 
----
+### Executando os testes
 
-## 🧪 Testes
-
-Instale o pacote em modo editável e execute os testes com `pytest`:
+Instale o pacote no modo editável e execute a suíte de testes com `pytest`:
 
 ```bash
 pip install -e .
 pytest
 ```
 
-Os testes cobrem cada marco das issues **#1** a **#9**, abrangendo o mini loop em Python, o esqueleto C, I/O, subprocessos e sinais.
+Os testes cobrem cada marco das issues **#1** a **#9**, incluindo o loop Python, o esqueleto em C, I/O watchers, helpers de subprocess e tratamento de sinais.
 
 ---
 
-## ⚙️ Arquitetura
+## 📚 Visão Geral da Arquitetura
 
-### 📦 Diagrama de Componentes
+A seguir, diagramas Mermaid ilustram como as peças se encaixam.
+
+### ER Diagram (Entidades e Relacionamentos)
 
 ```mermaid
-componentDiagram
-    component Python [
-        Python 🐍
-    ]
-    component PyAsync [
-        py_async_lib
-    ]
-    component CLoop [
-        "casyncio (C loop)"
-    ]
-    component OS [
-        "Kernel: epoll/signalfd"
-    ]
-
-    Python --> PyAsync : chamadas asyncio
-    PyAsync --> CLoop : FFI/callbacks
-    CLoop --> OS : epoll, sinais
+erDiagram
+    PYTHON_USER_CODE ||--o{ PY_ASYNC_LIB : calls
+    PY_ASYNC_LIB ||--|| CASYNCIO : binds
+    CASYNCIO ||--o{ ASYNCIO_TASKS : schedules
 ```
 
----
-
-### 🔁 Diagrama de Sequência (StreamWriter)
+### Sequence Diagram (Fluxo de Chamadas)
 
 ```mermaid
 sequenceDiagram
-    participant App
-    participant StreamWriter
-    participant CLoop
-    participant OS
+    participant User as Python user code 🐍
+    participant Lib as py_async_lib package 📦
+    participant CLoop as casyncio (C) ⚙️
+    participant Tasks as asyncio tasks/futures 🔑
 
-    App->>StreamWriter: write(data)
-    StreamWriter->>CLoop: _c_write(fd, data)
-    CLoop->>OS: send(fd, data)
-    OS-->>CLoop: confirma escrita
-    CLoop->>CLoop: buffer atualizado
-    App->>StreamWriter: await drain()
-    StreamWriter->>CLoop: _c_drain_waiter(fd)
-    CLoop-->>App: Future resolvido
+    User->>Lib: import & chamadas de API
+    Lib->>CLoop: install(), create_event_loop()
+    Lib->>CLoop: StreamWriter.write(data)
+    CLoop->>CLoop: epoll_wait() (monitoramento de I/O)
+    CLoop-->>Tasks: expedites callbacks
+    Tasks->>Lib: executa callback Python
 ```
 
----
-
-### 📈 Fluxo de Dados
+### State Diagram (Estados do Loop de Eventos)
 
 ```mermaid
-flowchart TD
-    A[Python Coroutine] --> B[StreamWriter.write()]
-    B --> C[_c_write() (C)]
-    C --> D[epoll loop]
-    D --> E[Callback]
-    E --> F[asyncio.Future set_result]
-```
-
----
-
-### 🧬 Diagrama de Estado do Event Loop
-
-```mermaid
-stateDiagram-v2
-    [*] --> INIT: Criado
-    INIT --> RUNNING: loop.run_forever()
-    RUNNING --> STOPPED: loop.stop()
+stateDiagram
+    [*] --> INIT : novo loop
+    INIT --> RUNNING : run_forever()
+    RUNNING --> STOPPED : stop()
     STOPPED --> [*]
 ```
 
 ---
 
-## 🧩 Estrutura do Projeto
+## Como Funciona
 
-```bash
-py_async_lib/
-├── stream_writer.py      # StreamWriter com write/drain
-├── policy.py             # Política asyncio customizada
-├── __init__.py           # Interface pública
-
-project/
-└── src/
-    ├── loop.h            # Definições do loop C
-    └── loopmodule.c      # Implementação do loop
-
-benchmarks/
-├── throughput.py         # Comparação com asyncio
-└── validate.py           # Runner de benchmark
-
-tests/
-└── test_casyncio.py      # Testes funcionais
-
-scripts/
-├── massif.sh             # Valgrind
-└── perf_flamegraph.sh    # Flamegraph via perf
-```
+1. **Python user code** chama funções no pacote `py_async_lib`.
+2. **py\_async\_lib** faz binding para o loop em C (`casyncio`).
+3. **casyncio** gerencia um loop baseado em `epoll`, integrando timers, I/O e sinais.
+4. Callbacks são enfileirados em **asyncio tasks/futures** para execução no contexto Python.
 
 ---
 
-## 📌 Progresso
+## Progresso de Desenvolvimento
 
-* Event loop C implementado
-* `OutBuf` gerencia escrita pendente
-* `signalfd` integrado para lidar com sinais
+* Estrutura inicial em Python e testes básicos (#1).
+* Esqueleto em C, configuração de build (#2).
+* `call_soon`, `run_forever` (#3).
+* Temporizadores (`call_later`) (#4).
+* Integração de I/O com `epoll` (#5).
+* Escrita não bloqueante e back-pressure (#6).
+* Cancelamento de tarefas e timeouts (#7).
+* Tratamento de sinais e subprocessos (#8).
+* Compatibilidade total com `asyncio` (#9).
+* Otimizações finais e perfilamento (#10).
