@@ -2,6 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import pytest
+import time
 
 from py_async_lib.mini_loop import MiniLoop, sleep
 
@@ -39,3 +40,20 @@ def test_loop_exits_when_done(capsys):
     loop.run()
     second_run = capsys.readouterr().out
     assert second_run == ""
+
+def test_call_later_runs_after_delay():
+    """call_later should schedule a coroutine after the given delay."""
+    loop = MiniLoop()
+    events = []
+
+    def coro():
+        events.append("done")
+        if False:
+            yield  # pragma: no cover
+
+    loop.call_later(0.01, coro())
+    start = time.time()
+    loop.run()
+    elapsed = time.time() - start
+    assert events == ["done"]
+    assert elapsed >= 0.01
