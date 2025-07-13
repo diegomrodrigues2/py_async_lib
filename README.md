@@ -1,5 +1,3 @@
-An updated `README.md` file for `py_async_lib` with in-depth explanations and Mermaid diagrams is provided below.
-
 # py_async_lib
 
 A custom implementation of the Python `asyncio` library from scratch, featuring a high-performance event loop written in C.
