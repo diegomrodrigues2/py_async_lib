@@ -150,6 +150,18 @@ loop_call_soon(PyEventLoopObject *self, PyObject *arg)
 }
 
 static PyObject *
+loop_call_later(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
+{
+    Py_RETURN_NOTIMPLEMENTED;
+}
+
+static PyObject *
+loop_create_task(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
+{
+    Py_RETURN_NOTIMPLEMENTED;
+}
+
+static PyObject *
 loop_add_reader(PyEventLoopObject *self, PyObject *args)
 {
     int fd;
@@ -478,6 +490,12 @@ loop_stop(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 static PyMethodDef loop_methods[] = {
     {"call_soon", (PyCFunction)loop_call_soon, METH_O,
      PyDoc_STR("Schedule a callback to run soon")},
+    {"call_later", (PyCFunction)(PyCFunctionWithKeywords)loop_call_later,
+     METH_VARARGS | METH_KEYWORDS,
+     PyDoc_STR("Schedule a callback to run after a delay")},
+    {"create_task", (PyCFunction)(PyCFunctionWithKeywords)loop_create_task,
+     METH_VARARGS | METH_KEYWORDS,
+     PyDoc_STR("Create a Task object")},
     {"add_reader", (PyCFunction)loop_add_reader, METH_VARARGS,
      PyDoc_STR("Register a reader callback for a file descriptor")},
     {"remove_reader", (PyCFunction)loop_remove_reader, METH_O,
