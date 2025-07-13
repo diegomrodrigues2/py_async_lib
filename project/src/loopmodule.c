@@ -61,6 +61,7 @@ loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
     sigemptyset(&self->sigmask);
     sigaddset(&self->sigmask, SIGINT);
     sigaddset(&self->sigmask, SIGTERM);
+    sigaddset(&self->sigmask, SIGCHLD);
     pthread_sigmask(SIG_BLOCK, &self->sigmask, NULL);
     self->sfd = signalfd(-1, &self->sigmask, SFD_CLOEXEC | SFD_NONBLOCK);
     if (self->sfd == -1) {
