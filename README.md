@@ -47,33 +47,33 @@ This diagram shows the sequence of events when a user writes data to a stream.
 sequenceDiagram
     participant User as Python Coroutine
     participant SW as StreamWriter
-    participant Loop as casyncio.EventLoop
+    participant EventLoop as casyncio.EventLoop
     participant OS as Kernel (epoll)
 
     User->>SW: write(b"data")
-    SW->>Loop: _c_write(fd, b"data")
-    Loop->>Loop: Append data to OutBuf
-    Loop->>OS: send(fd, b"data")
+    SW->>EventLoop: _c_write(fd, b"data")
+    EventLoop->>EventLoop: Append data to OutBuf
+    EventLoop->>OS: send(fd, b"data")
     alt Send is incomplete (EAGAIN)
-        OS-->>Loop: Returns partial write
-        Loop->>OS: epoll_ctl(ADD, EPOLLOUT)
+        OS-->>EventLoop: Returns partial write
+        EventLoop->>OS: epoll_ctl(ADD, EPOLLOUT)
     else Send is complete
-        OS-->>Loop: Returns full write count
+        OS-->>EventLoop: Returns full write count
     end
 
     User->>SW: await drain()
-    SW->>Loop: _c_drain_waiter(fd)
+    SW->>EventLoop: _c_drain_waiter(fd)
     alt Buffer is already empty
-        Loop-->>SW: Returns completed Future
+        EventLoop-->>SW: Returns completed Future
     else Buffer has pending data
-        Loop-->>SW: Returns pending Future
+        EventLoop-->>SW: Returns pending Future
     end
     SW-->>User: Awaits Future
 
-    OS->>Loop: EPOLLOUT event
-    Loop->>Loop: socket_write_now()
-    note right of Loop: Drain remaining data from OutBuf
-    Loop->>Loop: Set result on pending Future
+    OS->>EventLoop: EPOLLOUT event
+    EventLoop->>EventLoop: socket_write_now()
+    note right of EventLoop: Drain remaining data from OutBuf
+    EventLoop->>EventLoop: Set result on pending Future
 ```
 
 1.  A coroutine calls `StreamWriter.write()`.
