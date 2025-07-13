@@ -152,13 +152,37 @@ loop_call_soon(PyEventLoopObject *self, PyObject *arg)
 static PyObject *
 loop_call_later(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
 {
-    Py_RETURN_NOTIMPLEMENTED;
+    PyObject *delay_obj, *cb;
+    static char *kwlist[] = {"delay", "callback", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO:call_later", kwlist,
+                                     &delay_obj, &cb))
+        return NULL;
+    double delay = PyFloat_AsDouble(delay_obj);
+    if (PyErr_Occurred())
+        return NULL;
+    if (delay <= 0.0)
+        return loop_call_soon(self, cb);
+    PyErr_SetString(PyExc_NotImplementedError, "timers not implemented");
+    return NULL;
 }
 
 static PyObject *
 loop_create_task(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
 {
-    Py_RETURN_NOTIMPLEMENTED;
+    PyObject *coro;
+    static char *kwlist[] = {"coro", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O:create_task", kwlist, &coro))
+        return NULL;
+    PyObject *tasks = PyImport_ImportModule("asyncio.tasks");
+    if (!tasks)
+        return NULL;
+    PyObject *func = PyObject_GetAttrString(tasks, "create_task");
+    Py_DECREF(tasks);
+    if (!func)
+        return NULL;
+    PyObject *res = PyObject_CallFunction(func, "OO", coro, self);
+    Py_DECREF(func);
+    return res;
 }
 
 static PyObject *
