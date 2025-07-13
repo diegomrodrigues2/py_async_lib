@@ -45,10 +45,10 @@ componentDiagram
         py_async_lib
     ]
     component CLoop [
-        casyncio (C loop)
+        "casyncio (C loop)"
     ]
     component OS [
-        Kernel: epoll/signalfd
+        "Kernel: epoll/signalfd"
     ]
 
     Python --> PyAsync : chamadas asyncio
