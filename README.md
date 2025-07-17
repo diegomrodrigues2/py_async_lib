@@ -202,4 +202,4 @@ The development of the C event loop is tracked through a series of issues, each 
 *   **#11**: Implementation of timers with `call_later`.
 *   **#12**: Thread-safe callbacks (implemented).
 *   **#13**: `run_in_executor` and async DNS resolution (implemented).
-*   **#14**: High-level stream abstractions.
+*   **#14**: High-level stream abstractions (implemented).
