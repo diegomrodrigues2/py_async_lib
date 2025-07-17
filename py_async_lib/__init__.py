@@ -4,6 +4,8 @@ from .stream_writer import StreamWriter
 from .subprocess import Subprocess, create_subprocess_exec
 from .policy import _CAsyncioPolicy
 from .timer_handle import TimerHandle
+from .executor import run_in_executor
+from .dns import async_getaddrinfo
 
 def install() -> None:
     """Install the `_CAsyncioPolicy` as the default asyncio policy."""
@@ -17,4 +19,6 @@ __all__ = [
     "create_subprocess_exec",
     "install",
     "TimerHandle",
+    "run_in_executor",
+    "async_getaddrinfo",
 ]
