@@ -42,6 +42,8 @@ typedef struct {
     int sfd;
     PyObject *signal_handlers;
     int running;
+    int aw_rfd;
+    int aw_wfd;
 } PyEventLoopObject;
 
 #endif // CASYNCIO_LOOP_H
