@@ -237,18 +237,42 @@ loop_call_soon(PyEventLoopObject *self, PyObject *arg)
 static PyObject *
 loop_call_later(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
 {
-    PyObject *delay_obj, *cb;
+    double delay;
+    PyObject *callback;
     static char *kwlist[] = {"delay", "callback", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO:call_later", kwlist,
-                                     &delay_obj, &cb))
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "dO:call_later", kwlist,
+                                     &delay, &callback))
         return NULL;
-    double delay = PyFloat_AsDouble(delay_obj);
-    if (PyErr_Occurred())
+    if (!PyCallable_Check(callback)) {
+        PyErr_SetString(PyExc_TypeError, "callback must be callable");
         return NULL;
+    }
     if (delay <= 0.0)
-        return loop_call_soon(self, cb);
-    PyErr_SetString(PyExc_NotImplementedError, "timers not implemented");
-    return NULL;
+        return loop_call_soon(self, callback);
+
+    TimerNode *node = PyMem_Malloc(sizeof(TimerNode));
+    if (!node)
+        return PyErr_NoMemory();
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    int64_t now_ns = (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
+    node->deadline_ns = now_ns + (int64_t)(delay * 1e9);
+    Py_INCREF(callback);
+    node->callback = callback;
+    node->canceled = 0;
+    if (_heap_push(self, node) < 0) {
+        Py_DECREF(callback);
+        PyMem_Free(node);
+        return PyErr_NoMemory();
+    }
+    PyObject *handle = PyCapsule_New(node, "TimerNode", NULL);
+    if (!handle) {
+        node->canceled = 1;
+        Py_DECREF(callback);
+        PyMem_Free(node);
+        return NULL;
+    }
+    return handle;
 }
 
 static PyObject *
