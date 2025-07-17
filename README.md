@@ -149,6 +149,10 @@ erDiagram
 
 The loop exposes `call_soon_threadsafe()` to schedule callbacks from other threads. A self-pipe wakes the event loop so the function can be safely used from worker threads without race conditions.
 
+### run_in_executor and async DNS
+
+`py_async_lib.run_in_executor()` runs blocking functions in a thread pool and integrates with the event loop via `call_soon_threadsafe`. The helper `async_getaddrinfo()` wraps `socket.getaddrinfo` using this mechanism to perform non-blocking DNS lookups.
+
 ## 🚀 Benchmark
 
 You can compare the throughput of the project's event loop against Python's built-in `asyncio` loop with the benchmark script:
@@ -197,5 +201,5 @@ The development of the C event loop is tracked through a series of issues, each 
 *   **#10**: Profiling and final optimizations.
 *   **#11**: Implementation of timers with `call_later`.
 *   **#12**: Thread-safe callbacks (implemented).
-*   **#13**: Asynchronous DNS lookups via executors.
+*   **#13**: `run_in_executor` and async DNS resolution (implemented).
 *   **#14**: High-level stream abstractions.
