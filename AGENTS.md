@@ -166,6 +166,10 @@ The repository currently tracks the step-by-step implementation of an asyncio-li
 8. **#8** – Manage OS signals and subprocesses.
 9. **#9** – Work toward becoming a fully fledged event loop compatible with `asyncio`.
 10. **#10** – Profiling and final optimizations.
+11. **#11** – Heap-based timers and `call_later`.
+12. **#12** – Thread-safe callbacks.
+13. **#13** – `run_in_executor` and async DNS resolution.
+14. **#14** – High-level stream abstractions.
 
 Referencing these issues in commit messages and pull requests helps maintain traceability as each feature is implemented.
 
