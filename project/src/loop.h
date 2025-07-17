@@ -3,6 +3,7 @@
 
 #include <Python.h>
 #include <sys/epoll.h>
+#include <stdint.h>
 
 typedef struct {
     char *data;
@@ -11,10 +12,13 @@ typedef struct {
     PyObject *waiters;
 } OutBuf;
 
-typedef struct TimerNode {
-    double when;
-    PyObject *coro;
-    struct TimerNode *next;
+#define INITIAL_TIMER_CAPACITY 64
+
+typedef struct {
+    int64_t deadline_ns;
+    PyObject *callback;
+    int canceled;
+    int heap_index;
 } TimerNode;
 
 typedef struct {
@@ -29,7 +33,9 @@ typedef struct {
     PyObject_HEAD
     int epfd;
     PyObject *ready_q;
-    PyObject *timers;
+    TimerNode **timer_heap;
+    size_t timer_count;
+    size_t timer_capacity;
     FDCallback **fdmap;
     int fdcap;
     sigset_t sigmask;

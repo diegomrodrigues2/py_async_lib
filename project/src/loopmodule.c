@@ -9,27 +9,85 @@
 #include <sys/signalfd.h>
 #include <pthread.h>
 
-/* simple freelist for TimerNode allocations */
-static TimerNode *timer_freelist = NULL;
-
-static TimerNode *
-alloc_timer(void)
+/* timer heap helpers */
+static void _swap_nodes(PyEventLoopObject *self, size_t i, size_t j)
 {
-    TimerNode *t = timer_freelist;
-    if (t) {
-        timer_freelist = t->next;
-    } else {
-        t = PyMem_Malloc(sizeof(TimerNode));
+    TimerNode *tmp = self->timer_heap[i];
+    self->timer_heap[i] = self->timer_heap[j];
+    self->timer_heap[j] = tmp;
+    self->timer_heap[i]->heap_index = i;
+    self->timer_heap[j]->heap_index = j;
+}
+
+static void _sift_up(PyEventLoopObject *self, size_t i)
+{
+    while (i > 0) {
+        size_t parent = (i - 1) / 2;
+        if (self->timer_heap[i]->deadline_ns < self->timer_heap[parent]->deadline_ns) {
+            _swap_nodes(self, i, parent);
+            i = parent;
+        } else {
+            break;
+        }
     }
-    return t;
 }
 
-static void
-free_timer(TimerNode *t)
+static void _sift_down(PyEventLoopObject *self, size_t i)
 {
-    t->next = timer_freelist;
-    timer_freelist = t;
+    size_t n = self->timer_count;
+    while (1) {
+        size_t left = 2 * i + 1;
+        size_t right = 2 * i + 2;
+        size_t smallest = i;
+        if (left < n && self->timer_heap[left]->deadline_ns < self->timer_heap[smallest]->deadline_ns)
+            smallest = left;
+        if (right < n && self->timer_heap[right]->deadline_ns < self->timer_heap[smallest]->deadline_ns)
+            smallest = right;
+        if (smallest != i) {
+            _swap_nodes(self, i, smallest);
+            i = smallest;
+        } else {
+            break;
+        }
+    }
 }
+
+static int _heap_push(PyEventLoopObject *self, TimerNode *node)
+{
+    if (self->timer_count == self->timer_capacity) {
+        size_t newcap = self->timer_capacity ? self->timer_capacity * 2 : INITIAL_TIMER_CAPACITY;
+        TimerNode **newarr = PyMem_Realloc(self->timer_heap, newcap * sizeof(*newarr));
+        if (!newarr)
+            return -1;
+        self->timer_heap = newarr;
+        self->timer_capacity = newcap;
+    }
+    size_t idx = self->timer_count++;
+    self->timer_heap[idx] = node;
+    node->heap_index = (int)idx;
+    _sift_up(self, idx);
+    return 0;
+}
+
+static TimerNode *_heap_pop(PyEventLoopObject *self)
+{
+    if (self->timer_count == 0)
+        return NULL;
+    TimerNode *min = self->timer_heap[0];
+    self->timer_count--;
+    if (self->timer_count > 0) {
+        self->timer_heap[0] = self->timer_heap[self->timer_count];
+        self->timer_heap[0]->heap_index = 0;
+        _sift_down(self, 0);
+    }
+    return min;
+}
+
+static TimerNode *_heap_peek(PyEventLoopObject *self)
+{
+    return self->timer_count ? self->timer_heap[0] : NULL;
+}
+
 int
 socket_write_now(int fd, OutBuf *ob)
 {
@@ -73,9 +131,10 @@ loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
     self->ready_q = PyList_New(0);
     if (!self->ready_q)
         return -1;
-    self->timers = PyList_New(0);
-    if (!self->timers)
-        return -1;
+
+    self->timer_heap = NULL;
+    self->timer_count = 0;
+    self->timer_capacity = 0;
 
     self->fdmap = NULL;
     self->fdcap = 0;
@@ -131,7 +190,11 @@ loop_dealloc(PyEventLoopObject *self)
         close(self->sfd);
     Py_XDECREF(self->signal_handlers);
     Py_XDECREF(self->ready_q);
-    Py_XDECREF(self->timers);
+    for (size_t i = 0; i < self->timer_count; i++) {
+        Py_DECREF(self->timer_heap[i]->callback);
+        PyMem_Free(self->timer_heap[i]);
+    }
+    PyMem_Free(self->timer_heap);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
