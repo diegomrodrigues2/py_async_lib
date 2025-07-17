@@ -145,6 +145,10 @@ erDiagram
 *   **`FDCallback`**: Stores the `reader` and `writer` callbacks for a single file descriptor.
 *   **`OutBuf`**: A write buffer associated with an `FDCallback`. It holds the data to be written and a list of `Future` objects (`waiters`) to be notified upon successful drainage.
 
+### Thread-safe callbacks
+
+The loop exposes `call_soon_threadsafe()` to schedule callbacks from other threads. A self-pipe wakes the event loop so the function can be safely used from worker threads without race conditions.
+
 ## 🚀 Benchmark
 
 You can compare the throughput of the project's event loop against Python's built-in `asyncio` loop with the benchmark script:
@@ -192,6 +196,6 @@ The development of the C event loop is tracked through a series of issues, each 
 *   **#9**: Full compatibility with the `asyncio` event loop policy.
 *   **#10**: Profiling and final optimizations.
 *   **#11**: Implementation of timers with `call_later`.
-*   **#12**: Thread-safe callbacks.
+*   **#12**: Thread-safe callbacks (implemented).
 *   **#13**: Asynchronous DNS lookups via executors.
 *   **#14**: High-level stream abstractions.

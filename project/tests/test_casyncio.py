@@ -6,6 +6,8 @@ import gc
 import signal
 import asyncio
 import socket
+import threading
+import time
 from py_async_lib.stream_writer import StreamWriter
 from py_async_lib import install
 
@@ -106,4 +108,48 @@ def test_install_sets_event_loop_policy():
         assert isinstance(loop, casyncio.EventLoop)
     finally:
         asyncio.set_event_loop_policy(old)
+
+
+def test_call_soon_threadsafe_before_run():
+    loop = casyncio.EventLoop()
+    results = []
+
+    def worker():
+        loop.call_soon_threadsafe(lambda: results.append(42))
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    loop.call_soon(loop.stop)
+    loop.run_forever()
+
+    assert results == [42]
+
+
+def test_call_soon_threadsafe_during_run():
+    loop = casyncio.EventLoop()
+    results = []
+    r, w = socket.socketpair()
+    r.setblocking(False)
+    loop.add_reader(r.fileno(), lambda: None)
+
+    def run_loop():
+        loop.run_forever()
+
+    t = threading.Thread(target=run_loop)
+    t.start()
+    time.sleep(0.05)
+
+    def cb():
+        results.append("ok")
+        loop.stop()
+
+    loop.call_soon_threadsafe(cb)
+    t.join()
+    loop.remove_reader(r.fileno())
+    r.close()
+    w.close()
+
+    assert results == ["ok"]
 

@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <sys/signalfd.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 /* timer heap helpers */
 static void _swap_nodes(PyEventLoopObject *self, size_t i, size_t j)
@@ -128,6 +129,9 @@ loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
+    self->aw_rfd = -1;
+    self->aw_wfd = -1;
+
     self->ready_q = PyList_New(0);
     if (!self->ready_q)
         return -1;
@@ -150,12 +154,25 @@ loop_init(PyEventLoopObject *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
+    int pipefd[2];
+    if (pipe2(pipefd, O_CLOEXEC | O_NONBLOCK) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return -1;
+    }
+    self->aw_rfd = pipefd[0];
+    self->aw_wfd = pipefd[1];
+
     self->signal_handlers = PyDict_New();
     if (!self->signal_handlers)
         return -1;
 
     struct epoll_event ev = {.events = EPOLLIN, .data.u32 = (uint32_t)self->sfd};
     if (epoll_ctl(self->epfd, EPOLL_CTL_ADD, self->sfd, &ev) == -1) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return -1;
+    }
+    struct epoll_event ev2 = {.events = EPOLLIN, .data.u32 = (uint32_t)self->aw_rfd};
+    if (epoll_ctl(self->epfd, EPOLL_CTL_ADD, self->aw_rfd, &ev2) == -1) {
         PyErr_SetFromErrno(PyExc_OSError);
         return -1;
     }
@@ -188,6 +205,10 @@ loop_dealloc(PyEventLoopObject *self)
     }
     if (self->sfd != -1)
         close(self->sfd);
+    if (self->aw_rfd != -1)
+        close(self->aw_rfd);
+    if (self->aw_wfd != -1)
+        close(self->aw_wfd);
     Py_XDECREF(self->signal_handlers);
     Py_XDECREF(self->ready_q);
     for (size_t i = 0; i < self->timer_count; i++) {
@@ -231,6 +252,19 @@ loop_call_soon(PyEventLoopObject *self, PyObject *arg)
 {
     if (PyList_Append(self->ready_q, arg) < 0)
         return NULL;
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+loop_call_soon_threadsafe(PyEventLoopObject *self, PyObject *arg)
+{
+    if (PyList_Append(self->ready_q, arg) < 0)
+        return NULL;
+    char c = 'x';
+    if (write(self->aw_wfd, &c, 1) == -1 && errno != EAGAIN) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
     Py_RETURN_NONE;
 }
 
@@ -580,6 +614,12 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
                 }
                 continue;
             }
+            if (fd == self->aw_rfd) {
+                char buf[64];
+                while (read(self->aw_rfd, buf, sizeof(buf)) > 0)
+                    ;
+                continue;
+            }
             if (fd >= self->fdcap)
                 continue;
             FDCallback *slot = self->fdmap[fd];
@@ -662,6 +702,8 @@ loop_stop(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
 static PyMethodDef loop_methods[] = {
     {"call_soon", (PyCFunction)loop_call_soon, METH_O,
      PyDoc_STR("Schedule a callback to run soon")},
+    {"call_soon_threadsafe", (PyCFunction)loop_call_soon_threadsafe, METH_O,
+     PyDoc_STR("Thread-safe variant of call_soon")},
     {"call_later", (PyCFunction)(PyCFunctionWithKeywords)loop_call_later,
      METH_VARARGS | METH_KEYWORDS,
      PyDoc_STR("Schedule a callback to run after a delay")},
