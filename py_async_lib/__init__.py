@@ -7,6 +7,7 @@ from .policy import _CAsyncioPolicy
 from .timer_handle import TimerHandle
 from .executor import run_in_executor
 from .dns import async_getaddrinfo
+from .highlevel import open_connection, start_server
 
 def install() -> None:
     """Install the `_CAsyncioPolicy` as the default asyncio policy."""
@@ -23,4 +24,6 @@ __all__ = [
     "TimerHandle",
     "run_in_executor",
     "async_getaddrinfo",
+    "open_connection",
+    "start_server",
 ]
