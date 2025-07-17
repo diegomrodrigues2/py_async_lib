@@ -521,8 +521,17 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
             break;
 
         int n;
+        int timeout_ms = -1;
+        TimerNode *next = _heap_peek(self);
+        if (next) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            int64_t now_ns = (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
+            int64_t diff_ns = next->deadline_ns - now_ns;
+            timeout_ms = diff_ns <= 0 ? 0 : (int)(diff_ns / 1000000);
+        }
         Py_BEGIN_ALLOW_THREADS
-        n = epoll_wait(self->epfd, evs, 64, -1);
+        n = epoll_wait(self->epfd, evs, 64, timeout_ms);
         Py_END_ALLOW_THREADS
         if (n == -1) {
             PyErr_SetFromErrno(PyExc_OSError);
@@ -595,6 +604,23 @@ loop_run_forever(PyEventLoopObject *self, PyObject *Py_UNUSED(ignored))
                         return NULL;
                 }
             }
+        }
+
+        /* handle expired timers */
+        struct timespec now2;
+        clock_gettime(CLOCK_MONOTONIC, &now2);
+        int64_t now2_ns = (int64_t)now2.tv_sec * 1000000000 + now2.tv_nsec;
+        while ((next = _heap_peek(self)) && next->deadline_ns <= now2_ns) {
+            TimerNode *expired = _heap_pop(self);
+            if (!expired->canceled) {
+                if (PyList_Append(self->ready_q, expired->callback) < 0) {
+                    Py_DECREF(expired->callback);
+                    PyMem_Free(expired);
+                    return NULL;
+                }
+            }
+            Py_DECREF(expired->callback);
+            PyMem_Free(expired);
         }
     }
 
