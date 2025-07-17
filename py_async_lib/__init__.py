@@ -1,6 +1,7 @@
 """Minimal asynchronous library utilities."""
 
 from .stream_writer import StreamWriter
+from .streams import StreamReader
 from .subprocess import Subprocess, create_subprocess_exec
 from .policy import _CAsyncioPolicy
 from .timer_handle import TimerHandle
@@ -15,6 +16,7 @@ def install() -> None:
 
 __all__ = [
     "StreamWriter",
+    "StreamReader",
     "Subprocess",
     "create_subprocess_exec",
     "install",
