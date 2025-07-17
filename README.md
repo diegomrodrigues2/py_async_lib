@@ -191,3 +191,7 @@ The development of the C event loop is tracked through a series of issues, each 
 *   **#8**: Management of OS signals and subprocesses.
 *   **#9**: Full compatibility with the `asyncio` event loop policy.
 *   **#10**: Profiling and final optimizations.
+*   **#11**: Implementation of timers with `call_later`.
+*   **#12**: Thread-safe callbacks.
+*   **#13**: Asynchronous DNS lookups via executors.
+*   **#14**: High-level stream abstractions.
